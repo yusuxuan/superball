@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Super Ball</title>
+    <style>
+        canvas {
+            border: 2px solid #000;
+            display: block;
+            margin: 20px auto;
+            background-color: #f0f0f0;
+        }
+        .info {
+            text-align: center;
+            margin-top: 20px;
+            font-family: Arial, sans-serif;
+            color: #333;
+        }
+        .game-stats {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .health {
+            color: #ff6b6b;
+        }
+        .speed {
+            color: #4caf50;
+        }
+        .attack {
+            color: #ff9800;
+        }
+        .game-over {
+            color: #ff0000;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .controls {
+            color: #666;
+            font-size: 14px;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <div class="info">
+        <p>小球会随机移动并加速反弹，控制火柴人躲避并用长矛攻击小球！</p>
+        <div class="game-stats">
+            <div class="health" id="healthDisplay">血量: 3/3</div>
+            <div class="speed" id="speedDisplay">球速度: 12.0 | 反弹次数: 0</div>
+            <div class="attack" id="attackDisplay">攻击状态: 待命</div>
+            <div id="gameStatus"></div>
+        </div>
+        <div class="controls">
+            W键跳跃 | A键左移 | D键右移 | 空格键长矛攻击 | R键重新开始游戏
+        </div>
+    </div>
+    <script>
+    var canvas = document.getElementById("canvas");
+    var ctx = canvas.getContext("2d");
+    var width = canvas.width;
+    var height = canvas.height;
+    var healthDisplay = document.getElementById("healthDisplay");
+    var speedDisplay = document.getElementById("speedDisplay");
+    var attackDisplay = document.getElementById("attackDisplay");
+    var gameStatus = document.getElementById("gameStatus");
+    
+    var gameOver = false;
+    var invulnerableTime = 0;
+    var gameTime = 0;
+    
+    var circle = function(x, y, radius, fillCircle) {
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2, false);
+        if (fillCircle) {
+            ctx.fill();
+        } else {
+            ctx.stroke();
+        }
+    };
+    
+    var distance = function(x1, y1, x2, y2) {
+        return Math.sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
+    };
+    
+    var Ball = function() {
+        this.x = width / 2;
+        this.y = height / 2;
+        this.radius = 15;
+        this.baseSpeed = 12;
+        this.maxSpeed = 30;
+        this.speedIncrement = 1.5;
+        this.currentSpeed = this.baseSpeed;
+        this.health = 3;
+        this.maxHealth = 3;
+        this.slowDownEffect = 0;
+        this.stunEffect = 0; // 眩晕效果
+        
+        var angle = Math.random() * Math.PI * 2;
+        this.xSpeed = Math.cos(angle) * this.currentSpeed;
+        this.ySpeed = Math.sin(angle) * this.currentSpeed;
+        
+        this.bounceCount = 0;
+    }
+    
+    Ball.prototype.move = function() {
+        if (gameOver) return;
+        
+        // 处理眩晕效果
+        if (this.stunEffect > 0) {
+            this.stunEffect--;
+            return; // 眩晕时不移动
+        }
+        
+        // 处理减速效果
+        if (this.slowDownEffect > 0) {
+            this.slowDownEffect--;
+            if (this.slowDownEffect <= 0) {
+                var angle = Math.atan2(this.ySpeed, this.xSpeed);
+                this.xSpeed = Math.cos(angle) * this.currentSpeed;
+                this.ySpeed = Math.sin(angle) * this.currentSpeed;
+            }
+        }
+        
+        this.x += this.xSpeed;
+        this.y += this.ySpeed;
+        
+        var bounced = false;
+        
+        if (this.x - this.radius <= 0 || this.x + this.radius >= width) {
+            if (this.x - this.radius <= 0) {
+                this.x = this.radius;
+            } else {
+                this.x = width - this.radius;
+            }
+            bounced = true;
+            this.bounceOffVerticalWall();
+        }
+        
+        if (this.y - this.radius <= 0 || this.y + this.radius >= height) {
+            if (this.y - this.radius <= 0) {
+                this.y = this.radius;
+            } else {
+                this.y = height - this.radius;
+            }
+            bounced = true;
+            this.bounceOffHorizontalWall();
+        }
+        
+        if (bounced) {
+            this.increaseSpeed();
+            this.bounceCount++;
+        }
+    }
+    
+    Ball.prototype.getHitBySpear = function() {
+        // 被长矛击中，眩晕0.5秒，然后减速70%，持续2秒
+        this.stunEffect = 30; // 0.5秒眩晕
+        this.slowDownEffect = 150; // 2.5秒减速（包括眩晕时间）
+        
+        // 设置减速后的速度
+        setTimeout(() => {
+            if (this.slowDownEffect > 0) {
+                var angle = Math.atan2(this.ySpeed, this.xSpeed);
+                var slowedSpeed = this.currentSpeed * 0.3; // 减速到30%
+                this.xSpeed = Math.cos(angle) * slowedSpeed;
+                this.ySpeed = Math.sin(angle) * slowedSpeed;
+            }
+        }, 500); // 眩晕结束后开始减速移动
+    }
+    
+    Ball.prototype.bounceOffVerticalWall = function() {
+        this.xSpeed = -this.xSpeed;
+        var randomAngle = (Math.random() - 0.5) * Math.PI / 3;
+        var currentAngle = Math.atan2(this.ySpeed, this.xSpeed);
+        var newAngle = currentAngle + randomAngle;
+        
+        var currentSpeedMagnitude = this.slowDownEffect > 0 ? this.currentSpeed * 0.3 : this.currentSpeed;
+        this.xSpeed = Math.cos(newAngle) * currentSpeedMagnitude;
+        this.ySpeed = Math.sin(newAngle) * currentSpeedMagnitude;
+    }
+    
+    Ball.prototype.bounceOffHorizontalWall = function() {
+        this.ySpeed = -this.ySpeed;
+        var randomAngle = (Math.random() - 0.5) * Math.PI / 3;
+        var currentAngle = Math.atan2(this.ySpeed, this.xSpeed);
+        var newAngle = currentAngle + randomAngle;
+        
+        var currentSpeedMagnitude = this.slowDownEffect > 0 ? this.currentSpeed * 0.3 : this.currentSpeed;
+        this.xSpeed = Math.cos(newAngle) * currentSpeedMagnitude;
+        this.ySpeed = Math.sin(newAngle) * currentSpeedMagnitude;
+    }
+    
+    Ball.prototype.increaseSpeed = function() {
+        if (this.currentSpeed < this.maxSpeed) {
+            this.currentSpeed += this.speedIncrement;
+            if (this.currentSpeed > this.maxSpeed) {
+                this.currentSpeed = this.maxSpeed;
+            }
+        }
+        this.updateDisplay();
+    }
+    
+    Ball.prototype.takeDamage = function() {
+        if (invulnerableTime <= 0) {
+            this.health--;
+            invulnerableTime = 60;
+            this.updateDisplay();
+            
+            if (this.health <= 0) {
+                gameOver = true;
+                gameStatus.innerHTML = '<div class="game-over">游戏结束！按R键重新开始</div>';
+            }
+        }
+    }
+    
+    Ball.prototype.updateDisplay = function() {
+        healthDisplay.textContent = `血量: ${this.health}/${this.maxHealth}`;
+        var speedText;
+        if (this.stunEffect > 0) {
+            speedText = "眩晕中";
+        } else if (this.slowDownEffect > 0) {
+            speedText = "减速中";
+        } else {
+            speedText = this.currentSpeed.toFixed(1);
+        }
+        speedDisplay.textContent = `球速度: ${speedText} | 反弹次数: ${this.bounceCount}`;
+    }
+    
+    Ball.prototype.draw = function() {
+        var speedRatio = (this.currentSpeed - this.baseSpeed) / (this.maxSpeed - this.baseSpeed);
+        var red = Math.floor(255 * speedRatio + 100);
+        var green = Math.floor(255 * (1 - speedRatio));
+        var blue = 50;
+        
+        // 眩晕时显示紫色
+        if (this.stunEffect > 0) {
+            red = 150;
+            green = 100;
+            blue = 255;
+        }
+        // 减速时显示蓝色
+        else if (this.slowDownEffect > 0) {
+            red = 100;
+            green = 150;
+            blue = 255;
+        }
+        
+        if (invulnerableTime > 0 && Math.floor(invulnerableTime / 5) % 2 === 0) {
+            red = 255;
+            green = 200;
+            blue = 200;
+        }
+        
+        var gradient = ctx.createRadialGradient(
+            this.x - 5, this.y - 5, 0,
+            this.x, this.y, this.radius
+        );
+        gradient.addColorStop(0, `rgb(${Math.min(red + 50, 255)}, ${Math.min(green + 50, 255)}, ${blue + 50})`);
+        gradient.addColorStop(1, `rgb(${red}, ${green}, ${blue})`);
+        
+        ctx.fillStyle = gradient;
+        circle(this.x, this.y, this.radius, true);
+        
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 1 + speedRatio * 3;
+        circle(this.x, this.y, this.radius, false);
+        
+        // 眩晕效果 - 漩涡图案
+        if (this.stunEffect > 0) {
+            ctx.save();
+            ctx.strokeStyle = "#ff00ff";
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.8;
+            
+            var time = gameTime * 0.3;
+            for (var i = 0; i < 3; i++) {
+                var angle = time + i * Math.PI * 2 / 3;
+                var x1 = this.x + Math.cos(angle) * 5;
+                var y1 = this.y + Math.sin(angle) * 5;
+                var x2 = this.x + Math.cos(angle + Math.PI) * 10;
+                var y2 = this.y + Math.sin(angle + Math.PI) * 10;
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+        
+        // 减速效果环形指示器
+        if (this.slowDownEffect > 0 && this.stunEffect <= 0) {
+            ctx.save();
+            ctx.strokeStyle = "#00ffff";
+            ctx.lineWidth = 3;
+            ctx.globalAlpha = 0.7;
+            circle(this.x, this.y, this.radius + 5, false);
+            ctx.restore();
+        }
+        
+        if (this.currentSpeed > this.baseSpeed && this.slowDownEffect <= 0 && this.stunEffect <= 0) {
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+            circle(this.x - this.xSpeed * 0.5, this.y - this.ySpeed * 0.5, this.radius * 0.8, true);
+            circle(this.x - this.xSpeed * 1.0, this.y - this.ySpeed * 1.0, this.radius * 0.6, true);
+            ctx.restore();
+        }
+    };
+    
+    var StickMan = function() {
+        this.x = 100;
+        this.y = height - 100;
+        this.radius = 20;
+        this.lastAttackTime = 0; // 上次攻击时间
+        this.attackCooldown = 20; // 攻击冷却时间（帧数）
+        this.attackRange = 80; // 长矛攻击范围
+        this.isAttacking = false; // 是否正在攻击
+        this.attackAnimation = 0; // 攻击动画计数器
+        
+        this.xSpeed = 0;
+        this.ySpeed = 0;
+        this.acceleration = 1.8;
+        this.friction = 0.85;
+        this.gravity = 0.6;
+        this.jumpPower = -15;
+        this.groundY = height - 30;
+        this.onGround = true;
+        
+        this.walkAnimation = 0;
+        this.isMoving = false;
+    }
+    
+    StickMan.prototype.move = function() {
+        if (gameOver) return;
+        
+        // 更新攻击冷却和动画
+        if (this.lastAttackTime > 0) {
+            this.lastAttackTime--;
+        }
+        
+        if (this.attackAnimation > 0) {
+            this.attackAnimation--;
+            if (this.attackAnimation <= 0) {
+                this.isAttacking = false;
+            }
+        }
+        
+        if (!this.onGround) {
+            this.ySpeed += this.gravity;
+        }
+        
+        this.xSpeed *= this.friction;
+        
+        if (Math.abs(this.xSpeed) < 0.1) {
+            this.xSpeed = 0;
+            this.isMoving = false;
+        } else {
+            this.isMoving = true;
+        }
+        
+        this.x += this.xSpeed;
+        this.y += this.ySpeed;
+        
+        if (this.y >= this.groundY) {
+            this.y = this.groundY;
+            this.ySpeed = 0;
+            this.onGround = true;
+        } else {
+            this.onGround = false;
+        }
+        
+        if (this.x < 30) {
+            this.x = 30;
+            this.xSpeed = 0;
+        }
+        if (this.x > width - 30) {
+            this.x = width - 30;
+            this.xSpeed = 0;
+        }
+        
+        if (this.isMoving && this.onGround && !this.isAttacking) {
+            this.walkAnimation += Math.abs(this.xSpeed) * 0.3;
+        }
+    }
+    
+    StickMan.prototype.attack = function() {
+        if (this.lastAttackTime <= 0) {
+            this.isAttacking = true;
+            this.attackAnimation = 15; // 攻击动画持续15帧
+            this.lastAttackTime = this.attackCooldown;
+            
+            // 检查攻击范围内是否有球
+            var dist = distance(this.x, this.y, ball.x, ball.y);
+            if (dist <= this.attackRange) {
+                ball.getHitBySpear();
+                createHitEffect(ball.x, ball.y);
+                attackDisplay.textContent = "攻击状态: 击中目标！";
+                
+                // 2秒后恢复状态显示
+                setTimeout(() => {
+                    attackDisplay.textContent = "攻击状态: 待命";
+                }, 2000);
+            } else {
+                attackDisplay.textContent = "攻击状态: 未命中";
+                setTimeout(() => {
+                    attackDisplay.textContent = "攻击状态: 待命";
+                }, 1000);
+            }
+        }
+    }
+    
+    StickMan.prototype.jump = function() {
+        if (this.onGround) {
+            this.ySpeed = this.jumpPower;
+            this.onGround = false;
+        }
+    }
+    
+    StickMan.prototype.moveLeft = function() {
+        this.xSpeed -= this.acceleration;
+        if (this.xSpeed < -30) this.xSpeed = -30;
+    }
+    
+    StickMan.prototype.moveRight = function() {
+        this.xSpeed += this.acceleration;
+        if (this.xSpeed > 30) this.xSpeed = 30;
+    }
+    
+    StickMan.prototype.draw = function() {
+        ctx.save();
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        
+        var legSwing = 0;
+        if (this.isMoving && this.onGround && !this.isAttacking) {
+            legSwing = Math.sin(this.walkAnimation) * 0.3;
+        }
+        
+        // 头部
+        ctx.strokeStyle = "#ff9800";
+        ctx.fillStyle = "#ffeb3b";
+        circle(this.x, this.y - 25, 8, true);
+        circle(this.x, this.y - 25, 8, false);
+        
+        // 身体
+        ctx.strokeStyle = "#333";
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - 17);
+        ctx.lineTo(this.x, this.y + 10);
+        ctx.stroke();
+        
+        // 绘制长矛
+        ctx.save();
+        ctx.strokeStyle = "#8B4513"; // 棕色矛柄
+        ctx.lineWidth = 5;
+        
+        var spearDirection = ball.x > this.x ? 1 : -1;
+        var spearLength = this.isAttacking ? 60 : 50; // 攻击时长矛伸长
+        var spearAngle = this.isAttacking ? 0.2 * spearDirection : 0; // 攻击时倾斜
+        
+        // 矛柄
+        var spearEndX = this.x + spearDirection * spearLength;
+        var spearEndY = this.y - 10 + spearAngle * 20;
+        
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - 10);
+        ctx.lineTo(spearEndX, spearEndY);
+        ctx.stroke();
+        
+        // 矛头
+        ctx.strokeStyle = "#C0C0C0"; // 银色矛头
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(spearEndX, spearEndY);
+        ctx.lineTo(spearEndX + spearDirection * 15, spearEndY - 5);
+        ctx.lineTo(spearEndX + spearDirection * 15, spearEndY + 5);
+        ctx.lineTo(spearEndX, spearEndY);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.restore();
+        
+        // 手臂持矛
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        if (spearDirection > 0) {
+            // 右手持矛
+            ctx.moveTo(this.x - 8, this.y - 5);
+            ctx.lineTo(this.x + 20, this.y - 8);
+            ctx.moveTo(this.x + 8, this.y - 12);
+            ctx.lineTo(this.x + 30, this.y - 10);
+        } else {
+            // 左手持矛
+            ctx.moveTo(this.x + 8, this.y - 5);
+            ctx.lineTo(this.x - 20, this.y - 8);
+            ctx.moveTo(this.x - 8, this.y - 12);
+            ctx.lineTo(this.x - 30, this.y - 10);
+        }
+        ctx.stroke();
+        
+        // 腿部动画
+        var leftLegX = this.x - 8 + legSwing * 10;
+        var rightLegX = this.x + 8 - legSwing * 10;
+        var leftLegY = this.y + 25 + Math.abs(legSwing) * 3;
+        var rightLegY = this.y + 25 + Math.abs(-legSwing) * 3;
+        
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y + 10);
+        ctx.lineTo(leftLegX, leftLegY);
+        ctx.moveTo(this.x, this.y + 10);
+        ctx.lineTo(rightLegX, rightLegY);
+        ctx.stroke();
+        
+        if (!this.onGround) {
+            ctx.beginPath();
+            ctx.moveTo(this.x, this.y + 10);
+            ctx.lineTo(this.x - 6, this.y + 20);
+            ctx.moveTo(this.x, this.y + 10);
+            ctx.lineTo(this.x + 6, this.y + 20);
+            ctx.stroke();
+        }
+        
+        // 绘制攻击范围指示器（调试用，可注释掉）
+        if (this.isAttacking) {
+            ctx.save();
+            ctx.strokeStyle = "rgba(255, 255, 0, 0.5)";
+            ctx.lineWidth = 2;
+            circle(this.x, this.y, this.attackRange, false);
+            ctx.restore();
+        }
+        
+        ctx.restore();
+    }
+    
+    // 击中效果粒子
+    var hitEffects = [];
+    var createHitEffect = function(x, y) {
+        for (var i = 0; i < 15; i++) {
+            hitEffects.push({
+                x: x,
+                y: y,
+                xSpeed: (Math.random() - 0.5) * 12,
+                ySpeed: (Math.random() - 0.5) * 12,
+                life: 40,
+                maxLife: 40,
+                color: Math.random() > 0.5 ? "#ffff00" : "#ff6600"
+            });
+        }
+    }
+    
+    var updateHitEffects = function() {
+        for (var i = hitEffects.length - 1; i >= 0; i--) {
+            var effect = hitEffects[i];
+            effect.x += effect.xSpeed;
+            effect.y += effect.ySpeed;
+            effect.xSpeed *= 0.98; // 阻力
+            effect.ySpeed *= 0.98;
+            effect.life--;
+            
+            if (effect.life <= 0) {
+                hitEffects.splice(i, 1);
+            }
+        }
+    }
+    
+    var drawHitEffects = function() {
+        ctx.save();
+        for (var i = 0; i < hitEffects.length; i++) {
+            var effect = hitEffects[i];
+            var alpha = effect.life / effect.maxLife;
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = effect.color;
+            circle(effect.x, effect.y, 4, true);
+        }
+        ctx.restore();
+    }
+    
+    var checkCollision = function() {
+        if (gameOver || invulnerableTime > 0) return;
+        
+        var dist = distance(ball.x, ball.y, stickMan.x, stickMan.y);
+        if (dist < ball.radius + stickMan.radius) {
+            ball.takeDamage();
+        }
+    }
+    
+    var restartGame = function() {
+        ball = new Ball();
+        stickMan = new StickMan();
+        hitEffects = [];
+        gameOver = false;
+        invulnerableTime = 0;
+        gameTime = 0;
+        gameStatus.innerHTML = '';
+        attackDisplay.textContent = "攻击状态: 待命";
+        ball.updateDisplay();
+    }
+    
+    var ball = new Ball();
+    var stickMan = new StickMan();
+    
+    var keysPressed = {};
+    
+    document.addEventListener('keydown', function(event) {
+        keysPressed[event.keyCode] = true;
+        
+        if (event.keyCode === 82) { // R键重新开始
+            restartGame();
+        }
+        
+        event.preventDefault();
+    });
+    
+    document.addEventListener('keyup', function(event) {
+        keysPressed[event.keyCode] = false;
+        event.preventDefault();
+    });
+    
+    var handleInput = function() {
+        if (gameOver) return;
+        
+        if (keysPressed[87]) { // W键跳跃
+            stickMan.jump();
+        }
+        if (keysPressed[65]) { // A键左移
+            stickMan.moveLeft();
+        }
+        if (keysPressed[68]) { // D键右移
+            stickMan.moveRight();
+        }
+        if (keysPressed[32]) { // 空格键攻击
+            stickMan.attack();
+        }
+    }
+    
+    ball.updateDisplay();
+    
+    // 游戏循环
+    setInterval(function() {
+        gameTime++;
+        
+        ctx.clearRect(0, 0, width, height);
+        
+        handleInput();
+        
+        if (invulnerableTime > 0) {
+            invulnerableTime--;
+        }
+        
+        updateHitEffects();
+        
+        ball.move();
+        stickMan.move();
+        
+        checkCollision();
+        
+        // 绘制地面线
+        ctx.strokeStyle = "#8BC34A";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, height - 30);
+        ctx.lineTo(width, height - 30);
+        ctx.stroke();
+        
+        // 绘制边框
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, 0, width, height);
+        
+        // 绘制游戏对象
+        ball.draw();
+        stickMan.draw();
+        drawHitEffects();
+        
+        if (gameOver) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.fillStyle = "#fff";
+            ctx.font = "30px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("游戏结束", width/2, height/2 - 20);
+            ctx.font = "20px Arial";
+            ctx.fillText("按R键重新开始", width/2, height/2 + 20);
+        }
+    }, 30);
+    </script>
+</body>
+</html>
